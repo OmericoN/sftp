@@ -4,6 +4,7 @@ import logging
 import os
 import stat
 import struct
+from pathlib import Path
 
 import asyncssh
 
@@ -17,10 +18,12 @@ logging.getLogger("asyncssh").setLevel(logging.DEBUG)
 logging.getLogger("asyncio").setLevel(logging.INFO)
 
 
-HOST_KEY_PATH = "./server/ssh_host_ed25519_key"
+SERVER_DIR = Path(__file__).resolve().parent
+
+HOST_KEY_PATH = str(SERVER_DIR / "ssh_host_ed25519_key")
 LISTEN_HOST, LISTEN_PORT = "", 2222
 SFTP_SUBSYSTEM_NAME = "sftp"
-JAIL_ROOT = os.path.abspath("./server/sftp_root")
+JAIL_ROOT = str(SERVER_DIR / "sftp_root")
 
 # --- SFTP constants (subset for INIT/REALPATH/OPENDIR/READDIR/CLOSE) ---
 SSH_FXP_INIT, SSH_FXP_VERSION = 1, 2

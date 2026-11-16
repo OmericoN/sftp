@@ -4,14 +4,16 @@ This checklist follows the **Project Requirements** numbering in the assignment 
 
 The starter already implements most basic SFTP operations. Keep that code: add missing security, fix specific bugs, and demonstrate that it works. An unchecked box means implementation or verification remains; it does not mean you must rewrite the surrounding code.
 
-## Current starting point
+## Current progress
 
 - `server/server.py` contains the starter in the required entrypoint; `main.py` has been removed.
 - AsyncSSH transport, the SFTP subsystem, and shell/exec rejection are present. A host-key file exists; startup has not been tested here.
-- Most required SFTP handlers exist. FSTAT is declared but has no handler.
+- All required SFTP handlers now exist, including FSTAT. S1-S4 and S6-S7 have automated coverage; S5 still has the limitations below.
 - Authentication still uses `bob` / `test`; `auth.py` and `policy.py` are empty.
 - `data/users.json`, `user_roles.json`, `role_perms.csv`, and `acm_users.csv` exist. Their contents and loading have not been validated here.
-- `tests/test_sftp.py` is empty.
+- Tests live in `tests/test_sftp.py` and `tests/test_server_hardening.py`.
+- Latest run (16 November 2026): **27 passed, 1 skipped**. Windows denied symlink creation (error 1314); live SSH/OpenSSH and other operating systems have not been tested.
+- Path-replacement races remain unresolved and are documented in `README.md`.
 
 ## 1) SSH transport via AsyncSSH
 
@@ -89,9 +91,10 @@ Each test needs a one-line objective/docstring and isolated fixtures: temporary 
 - [ ] **MAC:** internal user reads public/internal but not confidential; confidential user cannot write to public.
 - [ ] **RBAC:** analyst reads/writes under `/projects` but cannot mkdir under `/admin`; adding admin permits it when DAC/MAC also allow it.
 - [ ] **Composition:** DAC allows/MAC denies and DAC denies/MAC allows both deny under AND composition.
-- [ ] **Jail:** at least one traversal attempt is denied.
+- [x] **Jail:** at least one traversal attempt is denied.
 - [ ] **Audit:** allow/deny records contain correct fields and values.
-- [ ] Also test authentication failures/throttling and protocol/handle fixes from section 3.
+- [ ] Test authentication failures/throttling once authentication is implemented.
+- [x] Test the protocol/handle fixes from section 3, with the S5 symlink/race limitations recorded below.
 
 ### Required design explanation
 
@@ -127,31 +130,52 @@ Page 3 explicitly requires these self-tests, despite the later repository-tree c
 
 Main file: `server/server.py`.
 
-| Request | Expected reply | Work to complete or verify |
+### S1-S7 completion
+
+These labels are our implementation breakdown, not separate numbered tasks in the PDF.
+
+- [x] **S1:** Implement FSTAT and test valid, invalid, directory, and removed handles.
+- [x] **S2:** Explicit file closure, invalid-handle rejection, disconnect cleanup, and continuation after cleanup errors.
+- [x] **S3:** OPEN flags/access modes, atomic exclusive creation, append writes, and READ/WRITE access restrictions.
+- [x] **S4:** Frame/string/attribute/payload validation, INIT checks, read limits, fragmented packets, and batched requests.
+- [ ] **S5:** Complete path-security verification and address the remaining race risk; implemented/tested parts are split below.
+- [x] **S6:** Non-recursive MKDIR with success, duplicate, and missing-parent tests.
+- [x] **S7:** Safe error responses, server-side exception logging, and STATUS mapping tests.
+
+### Command status
+
+The tests exercise protocol handlers through in-memory channels; access-control policy and live client integration are separate unfinished work.
+
+| Request | Expected reply | Current status / remaining work |
 | --- | --- | --- |
-| INIT | VERSION(3) | Verify negotiation and initialization validation. |
-| REALPATH | NAME | Verify POSIX paths, jail checks, and authorization. |
-| STAT / LSTAT | ATTRS or STATUS | Verify metadata/errors and LSTAT no-follow behavior. |
-| FSTAT | ATTRS | Implement using a valid file handle and `os.fstat`. |
-| OPENDIR | HANDLE | Verify permissions and directory handle creation. |
-| READDIR | NAME, then STATUS(EOF) | Verify batching, handle checks, and EOF. |
-| MKDIR | STATUS | Fix recursive creation; enforce parent checks/inheritance. |
-| OPEN | HANDLE | Fix read/write/create/truncate/append/exclusive flags. |
-| READ | DATA or STATUS(EOF) | Verify permission, offsets, bounded reads, and EOF. |
-| WRITE | STATUS | Verify permission, offsets, and append on every write. |
-| CLOSE | STATUS | Explicitly close files and reject invalid handles. |
+| INIT | VERSION(3) | Implemented and tested: versions, extensions, ordering, and repeated INIT rejection. |
+| REALPATH | NAME | Handler and path checks implemented; authorization and live-client verification pending. |
+| STAT / LSTAT | ATTRS or STATUS | Metadata/error checks tested; symlink no-follow test skipped on Windows. Authorization pending. |
+| FSTAT | ATTRS | Implemented/tested using a file handle and `os.fstat`; policy integration pending. |
+| OPENDIR | HANDLE | Directory handle creation tested; DAC/MAC/RBAC permissions pending. |
+| READDIR | NAME, then STATUS(EOF) | Batching, handle checks, and EOF tested; policy integration pending. |
+| MKDIR | STATUS | Non-recursive creation/errors tested; policy checks and metadata inheritance pending. |
+| OPEN | HANDLE | Read/write/create/truncate/append/exclusive behavior tested; policy integration pending. |
+| READ | DATA or STATUS(EOF) | Handle access, offsets, bounded reads, and EOF tested; policy integration pending. |
+| WRITE | STATUS | Handle access, offsets, binary data, and repeated append tested; policy integration pending. |
+| CLOSE | STATUS | Explicit closure, invalid handles, and cleanup failures tested. |
 
 ### Shared fixes and checks
 
-- [ ] Validate packet/field/string lengths, request IDs, and initialization order; malformed requests must not crash the session.
-- [ ] Bound packet buffering and read sizes; handle fragmented packets and multiple packets received together.
-- [ ] Treat client paths as POSIX on all OSes and map them inside the jail.
-- [ ] Test traversal/symlink escapes; address path-replacement race basics and document residual limitations.
-- [ ] Honor OPEN capabilities throughout handle use; make exclusive creation atomic and preserve append semantics on every WRITE.
-- [ ] Use `os.mkdir` for one directory rather than recursively creating missing parents.
-- [ ] Close outstanding files on disconnect/error and keep handle tables private to sessions.
-- [ ] Return STATUS codes appropriately: OK(0), EOF(1), NO_SUCH_FILE(2), PERMISSION_DENIED(3), FAILURE(4). Reject unknown requests cleanly.
-- [ ] Log internal errors server-side without exposing host paths/details in client responses.
+- [x] Validate packet/field/string lengths, request IDs, and initialization order; malformed-request tests pass.
+- [x] Reject zero/oversized frames, cap read sizes, and handle fragmented/batched packets in tests.
+- [x] Use POSIX client-path normalization and map paths into the OS jail; normalization/containment tests pass on Windows.
+- [ ] Run the path tests on macOS/Linux as well as Windows.
+- [x] Reject traversal, null bytes, drive/stream syntax, and sibling-prefix escapes in tests.
+- [x] Implement separate STAT/LSTAT symlink resolution and add symlink tests.
+- [ ] Run symlink tests successfully on a system permitting link creation; current test is skipped.
+- [x] Document the path-replacement race limitation and trusted-local-writer assumption in `README.md`.
+- [ ] Prevent path-replacement races if untrusted local writers can modify jail directories; the current checks are not atomic.
+- [x] Honor OPEN capabilities throughout handle use; make exclusive creation atomic and preserve append semantics on every WRITE.
+- [x] Use `os.mkdir` for one directory rather than recursively creating missing parents.
+- [x] Close outstanding files on disconnect/error and keep handle tables private to sessions.
+- [x] Return STATUS codes appropriately: OK(0), EOF(1), NO_SUCH_FILE(2), PERMISSION_DENIED(3), FAILURE(4). Reject unknown requests cleanly.
+- [x] Log internal errors server-side without exposing host paths/details in client responses.
 
 **Done when:** every required request is covered, transfers preserve bytes, malformed requests fail predictably, and file handles are cleaned up.
 
@@ -182,7 +206,9 @@ Main file: `server/server.py`.
 
 - [ ] Follow the required repository structure: server entrypoint/auth/policy, runtime audit log/jail, client, tests, README, and CTF PDF.
 - [ ] Document Windows/macOS/Linux setup, host-key generation, run commands, expected outputs, predefined users, and limitations.
-- [ ] Run automated tests and OpenSSH interoperability checks; record results for the group.
+- [x] Run the current S1-S7 automated suite and record results: 27 passed, 1 symlink test skipped.
+- [ ] Complete authentication/authorization/audit tests as those features are implemented.
+- [ ] Run OpenSSH interoperability checks and record results for the group.
 - [ ] Disclose generative AI use and which code/report components it helped with, as required by the assignment.
 
 **Scope:** public-key login, MFA, runtime user/role administration, remove/rename, and per-user overrides are not needed for the required subset. If per-user overrides are implemented, explicit deny must win.

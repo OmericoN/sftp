@@ -49,6 +49,7 @@ Thumbs.db
 
 # Logs and temporary files
 *.log
+server/audit.jsonl
 *.tmp
 *.bak
 .cache/

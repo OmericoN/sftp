@@ -10,6 +10,20 @@ from unittest.mock import patch
 from server import server as sftp
 
 
+class AllowPolicy:
+    def authorize(self, user, op, path):
+        return True, "allowed"
+
+    def path(self, path):
+        return str(path)
+
+    def mode(self, path):
+        return None
+
+    def audit_denial(self, user, op, path, reason):
+        pass
+
+
 class PathTests(unittest.TestCase):
     def test_safe_join(self):
         """Normal paths stay inside the jail; escaping paths are rejected."""
@@ -67,7 +81,7 @@ class PathTests(unittest.TestCase):
                             str(jail), b"/parent-link/secret.txt", follow_symlinks=follow
                         )
 
-            session = sftp.SFTPSession()
+            session = sftp.SFTPSession("test", AllowPolicy())
             session.initialized = True
             replies = []
             session._chan = SimpleNamespace(write=replies.append)
@@ -104,7 +118,7 @@ class OpenTests(unittest.TestCase):
                 path = Path(root) / "test.bin"
                 if exists:
                     path.write_bytes(b"hello")
-                session = sftp.SFTPSession()
+                session = sftp.SFTPSession("test", AllowPolicy())
                 session.initialized = True
                 replies = []
                 session._chan = SimpleNamespace(write=replies.append)
@@ -139,7 +153,7 @@ class OpenTests(unittest.TestCase):
 class FstatTests(unittest.TestCase):
     def test_fstat(self):
         """FSTAT returns open-file attributes without seeking and rejects invalid handles/payloads."""
-        session = sftp.SFTPSession()
+        session = sftp.SFTPSession("test", AllowPolicy())
         session.initialized = True
         replies = []
         session._chan = SimpleNamespace(write=replies.append)
@@ -149,7 +163,7 @@ class FstatTests(unittest.TestCase):
             file.write(b"hello")
             file.flush()
             file.seek(2)
-            handle = session.handles.add(file)
+            handle = session.handles.add(file, "/unused")
             session._handle(bytes([sftp.SSH_FXP_FSTAT]) + sftp.p_u32(req_id) + handle)
             expected = sftp.pack_pkt(
                 sftp.SSH_FXP_ATTRS,
@@ -160,7 +174,7 @@ class FstatTests(unittest.TestCase):
             raw_handle, _ = sftp.ustr(handle, 0)
             session.handles.close(raw_handle)
 
-            directory = session.handles.add(sftp.DirHandle([]))
+            directory = session.handles.add(sftp.DirHandle([]), "/unused")
             for invalid in (handle, directory, sftp.p_str(b"missing"), sftp.p_u32(10) + b"x"):
                 with self.subTest(handle=invalid):
                     session._handle(

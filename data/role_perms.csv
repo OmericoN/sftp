@@ -1,8 +1,6 @@
-role,resource,read,write,delete
-admin,model.pkl,read,write,delete
-admin,audit.log,read,write
-admin,report.csv,read,write,delete
-analyst,model.pkl,read,write
-analyst,audit.log,read
-analyst,report.csv,read,write
-intern,report.csv,read
+role,resource,realpath,stat,list,mkdir,read,write
+admin,/,realpath,stat,list,mkdir,read,write
+analyst,/,realpath,stat,list,,,
+analyst,/projects,realpath,stat,list,mkdir,read,write
+intern,/,realpath,stat,list,,,
+intern,/public,realpath,stat,list,,read,

@@ -13,6 +13,20 @@ from unittest.mock import Mock, patch
 from server import server as sftp
 
 
+class AllowPolicy:
+    def authorize(self, user, op, path):
+        return True, "allowed"
+
+    def path(self, path):
+        return str(path)
+
+    def mode(self, path):
+        return None
+
+    def audit_denial(self, user, op, path, reason):
+        pass
+
+
 class SessionTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -30,7 +44,7 @@ class SessionTests(unittest.TestCase):
     def new_session(self, initialized=True):
         self.replies = []
         self.channel = SimpleNamespace(write=self.replies.append, close=Mock())
-        self.session = sftp.SFTPSession()
+        self.session = sftp.SFTPSession("test", AllowPolicy())
         self.session.connection_made(self.channel)
         self.session.initialized = initialized
         self.addCleanup(self.session.handles.close_all)
@@ -95,8 +109,8 @@ class HandleCleanupTests(SessionTests):
                 files = [tempfile.TemporaryFile(), tempfile.TemporaryFile()]
                 for file in files:
                     self.addCleanup(file.close)
-                    self.session.handles.add(file)
-                self.session.handles.add(sftp.DirHandle([]))
+                    self.session.handles.add(file, str(self.jail / "file.bin"))
+                self.session.handles.add(sftp.DirHandle([]), str(self.jail))
                 self.session.connection_lost(error)
                 self.assertTrue(all(file.closed for file in files))
                 self.assertEqual(self.session.handles._map, {})
@@ -107,9 +121,9 @@ class HandleCleanupTests(SessionTests):
         """S2: A failing close is logged without preventing remaining handles from closing."""
         broken = Mock()
         broken.close.side_effect = OSError("simulated close failure")
-        self.session.handles.add(broken)
+        self.session.handles.add(broken, str(self.jail / "file.bin"))
         with tempfile.TemporaryFile() as file:
-            self.session.handles.add(file)
+            self.session.handles.add(file, str(self.jail / "file.bin"))
             with self.assertLogs(level="ERROR") as logs:
                 self.session.handles.close_all()
             self.assertTrue(file.closed)
@@ -120,7 +134,7 @@ class HandleCleanupTests(SessionTests):
         """S2/S7: A file-close failure returns FAILURE and invalidates the handle."""
         file = Mock()
         file.close.side_effect = OSError("simulated flush failure")
-        encoded = self.session.handles.add(file)
+        encoded = self.session.handles.add(file, str(self.jail / "file.bin"))
         handle, _ = sftp.ustr(encoded, 0)
         with self.assertLogs(level="ERROR"):
             self.assert_status(self.request(sftp.SSH_FXP_CLOSE, encoded), sftp.SSH_FX_FAILURE)
@@ -133,6 +147,7 @@ class FileAccessTests(SessionTests):
         path = self.jail / "file.bin"
         path.write_bytes(b"original")
         for flags in (0, sftp.PF_READ | 0x40, sftp.PF_READ | sftp.PF_TRUNC,
+                      sftp.PF_READ | sftp.PF_CREAT, sftp.PF_READ | sftp.PF_APPEND,
                       sftp.PF_WRITE | sftp.PF_EXCL):
             with self.subTest(flags=flags):
                 reply = self.request(
@@ -217,7 +232,7 @@ class FileAccessTests(SessionTests):
         """S1/S3: File requests reject missing/directory handles; READDIR rejects file handles."""
         (self.jail / "file.bin").write_bytes(b"data")
         file_handle = self.open_file(sftp.PF_READ | sftp.PF_WRITE)
-        directory, _ = sftp.ustr(self.session.handles.add(sftp.DirHandle([])), 0)
+        directory, _ = sftp.ustr(self.session.handles.add(sftp.DirHandle([]), str(self.jail)), 0)
         for handle in (b"unknown", directory):
             for kind, tail in (
                 (sftp.SSH_FXP_FSTAT, b""),
@@ -326,7 +341,7 @@ class PacketValidationTests(SessionTests):
         handle = self.open_file(sftp.PF_READ | sftp.PF_WRITE)
         file = self.session.handles.get(handle)
         directory = sftp.DirHandle([])
-        directory_handle, _ = sftp.ustr(self.session.handles.add(directory), 0)
+        directory_handle, _ = sftp.ustr(self.session.handles.add(directory, str(self.jail)), 0)
         bodies = (
             (sftp.SSH_FXP_REALPATH, sftp.p_str(b"/file.bin")),
             (sftp.SSH_FXP_STAT, sftp.p_str(b"/file.bin")),

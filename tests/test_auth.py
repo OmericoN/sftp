@@ -4,8 +4,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from server.auth import load_users, verify_password, LoginLimiter
+from server.server import Server
 
 
 class AuthenticationTests(unittest.TestCase):
@@ -58,6 +60,26 @@ class AuthenticationTests(unittest.TestCase):
         self.assertFalse(
             verify_password(self.users, "unknown", "test-password")
         )
+
+    def test_server_handoff_and_lockout(self):
+        """Only a verified, unlocked user is passed into a new SFTP session."""
+        now = [100.0]
+        limiter = LoginLimiter(max_attempts=2, cooldown=60, clock=lambda: now[0])
+        policy = SimpleNamespace()
+        server = Server(self.users, limiter, policy)
+        server.begin_auth("alice")
+        self.assertFalse(server.session_requested())
+        self.assertFalse(server.validate_password("alice", "wrong"))
+        self.assertFalse(server.validate_password("alice", "wrong"))
+        self.assertFalse(server.validate_password("alice", "test-password"))
+        self.assertFalse(server.session_requested())
+        now[0] = 160.0
+        self.assertTrue(server.validate_password("alice", "test-password"))
+        session = server.session_requested()
+        self.assertEqual(session.username, "alice")
+        self.assertIs(session.policy, policy)
+        self.assertFalse(server.validate_password("unknown", "test-password"))
+        self.assertFalse(server.session_requested())
 
 
 class LoginLimiterTests(unittest.TestCase):

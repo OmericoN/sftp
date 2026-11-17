@@ -1,0 +1,13 @@
+{
+  "users": {
+    "alice": ["admins"],
+    "bob": ["analysts"],
+    "eve": ["interns"]
+  },
+  "paths": {
+    "/": {"owner": "alice", "group": "admins", "mode": "0755"},
+    "/projects": {"owner": "bob", "group": "analysts", "mode": "0750"},
+    "/admin": {"owner": "alice", "group": "admins", "mode": "0700"},
+    "/public": {"owner": "eve", "group": "interns", "mode": "0755"}
+  }
+}

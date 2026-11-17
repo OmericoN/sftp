@@ -1,10 +1,12 @@
 import base64
+import asyncio
 import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from server.auth import load_users, verify_password, LoginLimiter
 from server.server import Server
@@ -63,23 +65,31 @@ class AuthenticationTests(unittest.TestCase):
 
     def test_server_handoff_and_lockout(self):
         """Only a verified, unlocked user is passed into a new SFTP session."""
-        now = [100.0]
-        limiter = LoginLimiter(max_attempts=2, cooldown=60, clock=lambda: now[0])
-        policy = SimpleNamespace()
-        server = Server(self.users, limiter, policy)
-        server.begin_auth("alice")
-        self.assertFalse(server.session_requested())
-        self.assertFalse(server.validate_password("alice", "wrong"))
-        self.assertFalse(server.validate_password("alice", "wrong"))
-        self.assertFalse(server.validate_password("alice", "test-password"))
-        self.assertFalse(server.session_requested())
-        now[0] = 160.0
-        self.assertTrue(server.validate_password("alice", "test-password"))
-        session = server.session_requested()
-        self.assertEqual(session.username, "alice")
-        self.assertIs(session.policy, policy)
-        self.assertFalse(server.validate_password("unknown", "test-password"))
-        self.assertFalse(server.session_requested())
+        async def check():
+            now = [100.0]
+            limiter = LoginLimiter(max_attempts=2, cooldown=60, clock=lambda: now[0])
+            policy = SimpleNamespace()
+            server = Server(self.users, limiter, asyncio.Lock(), policy)
+            connection = Mock()
+            connection.get_extra_info.return_value = "alice"
+            server.connection_made(connection)
+            server.begin_auth("alice")
+            self.assertFalse(server.session_requested())
+            self.assertFalse(await server.validate_password("alice", "wrong"))
+            self.assertFalse(await server.validate_password("alice", "wrong"))
+            self.assertFalse(await server.validate_password("alice", "test-password"))
+            self.assertFalse(server.session_requested())
+            now[0] = 160.0
+            self.assertTrue(await server.validate_password("alice", "test-password"))
+            server.auth_completed()
+            session = server.session_requested()
+            self.assertEqual(session.username, "alice")
+            self.assertIs(session.policy, policy)
+            server.begin_auth("unknown")
+            self.assertFalse(await server.validate_password("unknown", "test-password"))
+            self.assertFalse(server.session_requested())
+
+        asyncio.run(check())
 
 
 class LoginLimiterTests(unittest.TestCase):
@@ -147,3 +157,29 @@ class LoginLimiterTests(unittest.TestCase):
 
         self.assertEqual(self.limiter.failures["alice"], 1)
         self.assertFalse(self.limiter.is_locked("alice"))
+
+
+class SessionIdentityTests(unittest.TestCase):
+    def test_session_before_authentication_is_rejected(self):
+        """Reject a session without an authenticated identity."""
+        server = Server({}, LoginLimiter(), asyncio.Lock(), SimpleNamespace())
+
+        self.assertFalse(server.session_requested())
+
+    def test_authenticated_username_reaches_session(self):
+        """Pass the SSH-authenticated username into the SFTP session."""
+        policy = SimpleNamespace()
+        server = Server({}, LoginLimiter(), asyncio.Lock(), policy)
+
+        connection = Mock()
+        connection.get_extra_info.return_value = "alice"
+
+        server.connection_made(connection)
+        server.begin_auth("alice")
+        server.auth_completed()
+
+        session = server.session_requested()
+
+        self.assertEqual(session.username, "alice")
+        self.assertIs(session.policy, policy)
+        connection.get_extra_info.assert_called_once_with("username")

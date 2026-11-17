@@ -11,7 +11,7 @@ The starter already implements most basic SFTP operations. Keep that code: add m
 - All required SFTP handlers exist, including FSTAT. S1-S4 and S6-S7 have automated coverage; S5 still has the limitations below.
 - Password verification and lockout are wired into the server; the verified username reaches each SFTP session.
 - `policy.py` loads the static DAC/MAC/RBAC data, enforces one gate, and audits decisions. `acm_users.csv` is unused legacy data.
-- Tests include authentication, policy, and SFTP packet coverage. Latest macOS run (17 November 2026): **49 passed**. Live AsyncSSH and OpenSSH `sftp` upload/download/deny checks passed; the group client is still empty.
+- Tests include authentication, policy, and SFTP packet coverage. Latest macOS run (17 November 2026): **51 passed**. Live AsyncSSH and OpenSSH `sftp` upload/download/deny checks passed after the auth merge; the group client is still empty.
 - Path-replacement races remain unresolved and are documented in `README.md`.
 
 ## 1) SSH transport via AsyncSSH
@@ -205,7 +205,7 @@ The tests exercise protocol handlers through in-memory channels and policy fixtu
 
 - [ ] Follow the required repository structure: server entrypoint/auth/policy, runtime audit log/jail, client, tests, README, and CTF PDF.
 - [ ] Document Windows/macOS/Linux setup, host-key generation, run commands, expected outputs, predefined users, and limitations.
-- [x] Run the current automated suite and record results: 49 passed on macOS.
+- [x] Run the current automated suite and record results: 51 passed on macOS.
 - [x] Complete authentication/authorization/audit tests as those features are implemented.
 - [x] Run OpenSSH `sftp` upload/download/deny checks with host-key verification.
 - [ ] Disclose generative AI use and which code/report components it helped with, as required by the assignment.

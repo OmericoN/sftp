@@ -1,8 +1,8 @@
 [
   {
     "username": "alice",
-    "salt": "ez0Kz8LGoz7nU4lcmM/ZiA==",
-    "password_hash": "2kmKoSMIWAqDmbDaUBnnGb/6g0IfLNqXjXIDthIjVQE=",
+    "salt": "iLUiSpdhT6yOGU3mvFbUPQ==",
+    "password_hash": "u95zLeEls/C+cdTFlYb4u4nKcxb4hC6aU2cYyLZSPjM=",
     "n": 16384,
     "r": 8,
     "p": 1,

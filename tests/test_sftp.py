@@ -67,7 +67,7 @@ class PathTests(unittest.TestCase):
                             str(jail), b"/parent-link/secret.txt", follow_symlinks=follow
                         )
 
-            session = sftp.SFTPSession()
+            session = sftp.SFTPSession("alice")
             session.initialized = True
             replies = []
             session._chan = SimpleNamespace(write=replies.append)
@@ -104,7 +104,7 @@ class OpenTests(unittest.TestCase):
                 path = Path(root) / "test.bin"
                 if exists:
                     path.write_bytes(b"hello")
-                session = sftp.SFTPSession()
+                session = sftp.SFTPSession("alice")
                 session.initialized = True
                 replies = []
                 session._chan = SimpleNamespace(write=replies.append)
@@ -139,7 +139,7 @@ class OpenTests(unittest.TestCase):
 class FstatTests(unittest.TestCase):
     def test_fstat(self):
         """FSTAT returns open-file attributes without seeking and rejects invalid handles/payloads."""
-        session = sftp.SFTPSession()
+        session = sftp.SFTPSession("alice")
         session.initialized = True
         replies = []
         session._chan = SimpleNamespace(write=replies.append)

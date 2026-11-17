@@ -3,6 +3,10 @@ import hashlib
 import json
 import tempfile
 import unittest
+import asyncio
+from unittest.mock import Mock
+
+from server.server import Server
 from pathlib import Path
 
 from server.auth import load_users, verify_password, LoginLimiter
@@ -125,3 +129,27 @@ class LoginLimiterTests(unittest.TestCase):
 
         self.assertEqual(self.limiter.failures["alice"], 1)
         self.assertFalse(self.limiter.is_locked("alice"))
+
+
+class SessionIdentityTests(unittest.TestCase):
+    def test_session_before_authentication_is_rejected(self):
+        """Reject a session without an authenticated identity."""
+        server = Server({}, LoginLimiter(), asyncio.Lock())
+
+        self.assertFalse(server.session_requested())
+
+    def test_authenticated_username_reaches_session(self):
+        """Pass the SSH-authenticated username into the SFTP session."""
+        server = Server({}, LoginLimiter(), asyncio.Lock())
+
+        connection = Mock()
+        connection.get_extra_info.return_value = "alice"
+
+        server.connection_made(connection)
+        server.begin_auth("alice")
+        server.auth_completed()
+
+        session = server.session_requested()
+
+        self.assertEqual(session.username, "alice")
+        connection.get_extra_info.assert_called_once_with("username")

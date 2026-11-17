@@ -30,7 +30,7 @@ class SessionTests(unittest.TestCase):
     def new_session(self, initialized=True):
         self.replies = []
         self.channel = SimpleNamespace(write=self.replies.append, close=Mock())
-        self.session = sftp.SFTPSession()
+        self.session = sftp.SFTPSession("alice")
         self.session.connection_made(self.channel)
         self.session.initialized = initialized
         self.addCleanup(self.session.handles.close_all)

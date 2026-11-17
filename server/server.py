@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 import asyncio
+if __package__:
+    from .auth import load_users, verify_password, LoginLimiter
+else:
+    from auth import load_users, verify_password, LoginLimiter
 import logging
 import os
 import posixpath
@@ -15,10 +19,10 @@ import asyncssh
 
 # Console debug logging for AsyncSSH
 logging.basicConfig(
-    level=logging.DEBUG,  # or INFO
+    level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logging.getLogger("asyncssh").setLevel(logging.DEBUG)
+logging.getLogger("asyncssh").setLevel(logging.INFO)
 # Optional: quiet down noisy asyncio internals
 logging.getLogger("asyncio").setLevel(logging.INFO)
 
@@ -229,7 +233,8 @@ def safe_join(jroot, path_bs, *, follow_symlinks=True):
 
 
 class SFTPSession(asyncssh.SSHServerSession):
-    def __init__(self):
+    def __init__(self, username):
+        self.username = username
         self.buf = b""
         self.handles = Handles()
         self.initialized = False
@@ -645,39 +650,92 @@ class SFTPSession(asyncssh.SSHServerSession):
             self._send_status(req_id, SSH_FX_FAILURE, b"operation failed")
 
 
-# --- Password auth implemented on the server class (no keyword args needed) ---
-def validate_user_password(username, password):
-    return username == "bob" and password == "test"
-
 
 class Server(asyncssh.SSHServer):
-    # Tell AsyncSSH we will do user auth:
-    def begin_auth(self, username):  # called when a new user starts auth
-        return True  # start authentication
+    def __init__(self, users, limiter, auth_lock):
+        self.users = users
+        self.limiter = limiter
+        self.auth_lock = auth_lock
+        self.connection = None
+        self.username = None
+
+    def connection_made(self, conn):
+        self.connection = conn
+
+    def begin_auth(self, username):
+        self.username = None
+        return True
 
     def password_auth_supported(self):
         return True
 
-    def validate_password(self, username, password):
-        return validate_user_password(username, password)
+    async def validate_password(self, username, password):
+        async with self.auth_lock:
+            if self.limiter.is_locked(username):
+                return False
+
+            if len(password.encode("utf-8")) > 1024:
+                self.limiter.record_failure(username)
+                return False
+
+            valid = await asyncio.to_thread(
+                verify_password,
+                self.users,
+                username,
+                password,
+            )
+
+            if not valid:
+                self.limiter.record_failure(username)
+                return False
+
+            self.limiter.reset(username)
+            return True
+
+    def auth_completed(self):
+        self.username = self.connection.get_extra_info("username")
 
     def session_requested(self):
-        return SFTPSession()
+        if self.username is None:
+            return False
+
+        return SFTPSession(self.username)
 
 
 async def main():
+    try:
+        users = load_users()
+    except (OSError, ValueError):
+        logging.error(
+            "Cannot load authentication users. Check data/users.json "
+            "for missing files, invalid JSON, or invalid user records."
+        )
+        raise SystemExit(1)
+
+    if not users:
+        logging.error("Authentication requires at least one configured user.")
+        raise SystemExit(1)
+
+    logging.info("Loaded %d authentication users", len(users))
+
+    # Shared across connections: reconnecting does not reset failures.
+    limiter = LoginLimiter(max_attempts=5, cooldown=60)
+    auth_lock = asyncio.Lock()
+
     os.makedirs(JAIL_ROOT, exist_ok=True)
-    print(f"Jail root: {JAIL_ROOT}")
-    await asyncssh.listen(
+
+    async with asyncssh.listen(
         LISTEN_HOST,
         LISTEN_PORT,
-        server_host_keys=[HOST_KEY_PATH],  # server identity key
-        server_factory=Server,  # our auth & session handler
-    )
-    print(
-        f"SFTP listening on {LISTEN_HOST or '0.0.0.0'}:{LISTEN_PORT} (subsystem '{SFTP_SUBSYSTEM_NAME}')"
-    )
-    await asyncio.Event().wait()
+        server_host_keys=[HOST_KEY_PATH],
+        server_factory=lambda: Server(users, limiter, auth_lock),
+    ):
+        logging.info(
+            "SFTP listening on %s:%d",
+            LISTEN_HOST or "0.0.0.0",
+            LISTEN_PORT,
+        )
+        await asyncio.Event().wait()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 [
   {
     "username": "alice",
-    "salt": "iLUiSpdhT6yOGU3mvFbUPQ==",
-    "password_hash": "u95zLeEls/C+cdTFlYb4u4nKcxb4hC6aU2cYyLZSPjM=",
+    "salt": "s7VHx8vtjMdM78xkoxYTSA==",
+    "password_hash": "ZojH+5EY2HXGXUlwJ9uVsb1SnUK3Bk/J/m3cA3ixBVU=",
     "n": 16384,
     "r": 8,
     "p": 1,
@@ -10,8 +10,8 @@
   },
   {
     "username": "bob",
-    "salt": "1837CE6HmLOtGIE7Sneg6A==",
-    "password_hash": "W40dLJTqfDtwZrVxtoaGA8ei+TpGyYsv3pv36wC8uXo=",
+    "salt": "39KwM1ncMX9ubhjzwFrdfw==",
+    "password_hash": "D6+pnZ1jRjRWoIx8OiCelMLHLrVve8NtG6xMkJRlm/8=",
     "n": 16384,
     "r": 8,
     "p": 1,

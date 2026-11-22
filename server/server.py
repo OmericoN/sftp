@@ -17,7 +17,7 @@ else:
     from auth import LoginLimiter, load_users, verify_password
     from policy import load_policy
 
-# SFTP focus: TODO S1-S7 below map to section 3 of SERVER_TASKS.md.
+# SFTP focus: TODO S1-S7 below map to section 3 of Tasks.md.
 # Verify each fix in tests/test_sftp.py; finish with an OpenSSH upload/download check.
 
 # Console debug logging for AsyncSSH

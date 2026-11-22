@@ -1,17 +1,19 @@
-# Project tasks: server first
+# Project tasks
 
-This checklist follows the **Project Requirements** numbering in the assignment PDF. The deadline stated there is **18 November**. The suggested coding order at the end accounts for dependencies between sections.
+This checklist follows the **Project Requirements** numbering in the assignment PDF. The deadline stated there is **18 November**.
 
 The starter already implements most basic SFTP operations. Keep that code: add missing security, fix specific bugs, and demonstrate that it works. An unchecked box means implementation or verification remains; it does not mean you must rewrite the surrounding code.
 
 ## Current progress
 
 - `server/server.py` contains the starter in the required entrypoint; `main.py` has been removed.
-- AsyncSSH transport, the SFTP subsystem, and shell/exec rejection are present. A host-key file exists; startup has not been tested here.
+- AsyncSSH transport, the SFTP subsystem, and shell/exec rejection are implemented. The default private host key is tracked in Git and needs replacing before submission.
 - All required SFTP handlers exist, including FSTAT. S1-S4 and S6-S7 have automated coverage; S5 still has the limitations below.
 - Password verification and lockout are wired into the server; the verified username reaches each SFTP session.
 - `policy.py` loads the static DAC/MAC/RBAC data, enforces one gate, and audits decisions. `acm_users.csv` is unused legacy data.
-- Tests include authentication, policy, and SFTP packet coverage. Latest macOS run (17 November 2026): **51 passed**. Live AsyncSSH and OpenSSH `sftp` upload/download/deny checks passed after the auth merge; the group client is still empty.
+- The Windows suite ran 69 tests: 68 passed and the symlink test skipped with `WinError 1314`. The symlink test passed when rerun separately in Administrator PowerShell. All 69 tests passed across the two runs.
+- The group client completed all seven commands with a verified `known_hosts` file. A 100,000-byte upload/download matched byte for byte, and the live audit log captured an access denial. The default client connection still disables host-key verification.
+- Windows OpenSSH `sftp` transferred matching bytes in both directions with a pinned host key and temporary test authentication. The batch process timed out after the transfer, so clean exit remains open.
 - Path-replacement races remain unresolved and are documented in `README.md`.
 
 ## 1) SSH transport via AsyncSSH
@@ -25,6 +27,7 @@ Main files: `server/server.py`, `server/auth.py`, `data/users.json`.
 - [x] Put the starter in `server/server.py`.
 - [x] Retain AsyncSSH transport, accept the `sftp` subsystem, and reject shell/exec requests.
 - [ ] Confirm startup uses a persistent Ed25519 host key and creates `server/sftp_root/` when missing. Do not regenerate the key on every run.
+- [ ] Replace the committed private host key, remove the private key from version control, and ignore its local path.
 - [ ] Confirm server paths work independently of the current working directory.
 
 ### Password authentication
@@ -93,7 +96,7 @@ Each test needs a one-line objective/docstring and isolated fixtures: temporary 
 - [x] **Jail:** at least one traversal attempt is denied.
 - [x] **Audit:** allow/deny records contain correct fields and values.
 - [x] Test authentication failures/throttling once authentication is implemented.
-- [x] Test the protocol/handle fixes from section 3, with the S5 symlink/race limitations recorded below.
+- [x] Test the protocol, handles, and symlink behavior from section 3. The path-replacement race remains documented below.
 
 ### Required design explanation
 
@@ -137,19 +140,19 @@ These labels are our implementation breakdown, not separate numbered tasks in th
 - [x] **S2:** Explicit file closure, invalid-handle rejection, disconnect cleanup, and continuation after cleanup errors.
 - [x] **S3:** OPEN flags/access modes, atomic exclusive creation, append writes, and READ/WRITE access restrictions.
 - [x] **S4:** Frame/string/attribute/payload validation, INIT checks, read limits, fragmented packets, and batched requests.
-- [ ] **S5:** Complete path-security verification and address the remaining race risk; implemented/tested parts are split below.
+- [ ] **S5:** Windows path and symlink checks passed. Verify path behavior on macOS/Linux and address the remaining race risk if the jail must support untrusted local writers.
 - [x] **S6:** Non-recursive MKDIR with success, duplicate, and missing-parent tests.
 - [x] **S7:** Safe error responses, server-side exception logging, and STATUS mapping tests.
 
 ### Command status
 
-The tests exercise protocol handlers through in-memory channels and policy fixtures. Live AsyncSSH and OpenSSH `sftp` checks passed; the group client remains unfinished.
+The tests exercise protocol handlers through in-memory channels and policy fixtures. The group client and Windows OpenSSH both completed live file transfers.
 
 | Request | Expected reply | Current status / remaining work |
 | --- | --- | --- |
 | INIT | VERSION(3) | Implemented and tested: versions, extensions, ordering, and repeated INIT rejection. |
 | REALPATH | NAME | Path checks and authorization tested; OpenSSH exercised it. |
-| STAT / LSTAT | ATTRS or STATUS | Metadata and policy checks tested; symlink no-follow test passed on macOS. |
+| STAT / LSTAT | ATTRS or STATUS | Metadata and policy checks tested. The symlink test passed in Administrator PowerShell. |
 | FSTAT | ATTRS | File-handle policy recheck tested. |
 | OPENDIR | HANDLE | Directory policy check tested. |
 | READDIR | NAME, then STATUS(EOF) | Handle recheck, filtering, batching, and EOF tested. |
@@ -167,7 +170,7 @@ The tests exercise protocol handlers through in-memory channels and policy fixtu
 - [ ] Run the path tests on macOS/Linux as well as Windows.
 - [x] Reject traversal, null bytes, drive/stream syntax, and sibling-prefix escapes in tests.
 - [x] Implement separate STAT/LSTAT symlink resolution and add symlink tests.
-- [ ] Run symlink tests successfully on a system permitting link creation; current test is skipped.
+- [x] Run the symlink test with permission to create links. On Windows, elevated PowerShell verified in-jail links, rejection of paths that resolve outside the jail, and `LSTAT` reporting the link itself.
 - [x] Document the path-replacement race limitation and trusted-local-writer assumption in `README.md`.
 - [ ] Prevent path-replacement races if untrusted local writers can modify jail directories; the current checks are not atomic.
 - [x] Honor OPEN capabilities throughout handle use; make exclusive creation atomic and preserve append semantics on every WRITE.
@@ -178,15 +181,16 @@ The tests exercise protocol handlers through in-memory channels and policy fixtu
 
 **Done when:** every required request is covered, transfers preserve bytes, malformed requests fail predictably, and file handles are cleaned up.
 
-## 4) Client-side commands: teammate integration
+## 4) Client-side commands
 
 **Intuition:** Your teammate builds the CLI; your server must understand its messages. Agree on SFTP v3 behavior, not a custom replacement protocol.
 
-- [ ] Coordinate `pwd`, `ls`, `mkdir`, `stat`, `get`, `put`, and `quit` with the client teammate.
-- [ ] Supply connection details and the host-key fingerprint/public key for verification. Keep the private key private.
-- [ ] Verify the client uses known_hosts or TOFU for host-key verification; this is primarily client work.
-- [ ] Test listing, directory creation, upload, download, and metadata with both the group client and OpenSSH `sftp`.
-- [ ] Compare uploaded/downloaded bytes and confirm forbidden operations produce clear errors.
+- [x] Implement and test `pwd`, `ls`, `mkdir`, `stat`, `get`, `put`, and `quit` in the group client.
+- [x] Document how to connect with a verified `known_hosts` file and display the server's host-key fingerprint.
+- [ ] Fix the default host-key verification path. Explicit `--known-hosts` works, but the default connection disables verification.
+- [x] Test listing, directory creation, metadata, upload, and download with both clients using pinned host keys. Verify uploaded and downloaded bytes match.
+- [x] Verify that the group client reports a clear permission error and the server records the denial.
+- [ ] Verify that Windows OpenSSH exits cleanly after the transfer.
 
 **Done when:** both clients complete the supported workflow with host-key verification enabled.
 
@@ -194,31 +198,28 @@ The tests exercise protocol handlers through in-memory channels and policy fixtu
 
 **Intuition:** The flag demonstrates that your controls protect something valuable. An intended user can reach it; an unauthorized user is stopped for an explainable reason.
 
-- [ ] Place a synthetic flag inside the jail and protect it with at least two layers, such as MAC plus DAC.
-- [ ] Demonstrate at least one realistic attack attempt: traversal, symlink trick, handle reuse, or a race.
-- [ ] Capture audit/log evidence and screenshots where useful, showing the outcome and protections.
-- [ ] Supply or write `CTF_writeup.pdf`: flag location, intended protections, how a naive design exposes it, attack attempt, fixes, and evidence.
+- [x] Place a synthetic flag at `/admin/flag.txt` and protect it with DAC, MAC, and RBAC.
+- [x] Verify that the traversal regression test denies and audits the attempt. Describe the result in `CTF_writeup.md`.
+- [x] Record live SFTP results for Alice, Bob, and Eve and include audit excerpts from the same run in the write-up.
+- [x] Supply `CTF_writeup.pdf` with the flag location, intended protections, traversal regression, and audit evidence.
 
 **Done when:** the write-up's claims can be reproduced and supported by server evidence.
 
 ## Final deliverables and handoff
 
 - [ ] Follow the required repository structure: server entrypoint/auth/policy, runtime audit log/jail, client, tests, README, and CTF PDF.
-- [ ] Document Windows/macOS/Linux setup, host-key generation, run commands, expected outputs, predefined users, and limitations.
-- [x] Run the current automated suite and record results: 51 passed on macOS.
+- [x] Document Windows/macOS/Linux setup, host-key generation, run commands, expected outputs, predefined users, and limitations.
+- [x] Record the Windows result: 68 passed in the normal run, plus the symlink test passed in a separate Administrator PowerShell run.
 - [x] Complete authentication/authorization/audit tests as those features are implemented.
-- [x] Run OpenSSH `sftp` upload/download/deny checks with host-key verification.
+- [x] Verify a byte-identical OpenSSH `sftp` round trip with host-key verification and verify denial using the group client.
 - [ ] Disclose generative AI use and which code/report components it helped with, as required by the assignment.
 
 **Scope:** public-key login, MFA, runtime user/role administration, remove/rename, and per-user overrides are not needed for the required subset. If per-user overrides are implemented, explicit deny must win.
 
-## Suggested implementation order
+## Remaining work in priority order
 
-The headings above match the PDF; dependencies make this a practical coding order:
-
-1. Validate existing datasets (2b) and replace hardcoded authentication (1).
-2. Implement and test the policy gate (2 and 2a).
-3. Connect authorization to handlers and fix protocol/handle issues (2 and 3).
-4. Check both clients, collect CTF evidence, and finish documentation (4 and 5).
+1. Fix default host-key verification and replace the tracked private key (1 and 4).
+2. Complete the group-wide AI-use disclosure. `CTF_writeup.pdf` covers the CTF review and report assistance (5).
+3. Check OpenSSH session exit and repeat path tests on macOS or Linux (3 and 4).
 
 Write relevant tests alongside each piece. Rubric: transport/protocol 25 points, authentication 10, authorization 35, client 10, security quality 10, CTF/write-up 10.

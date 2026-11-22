@@ -1,15 +1,90 @@
-# SFTP server
+# SFTP client and server
 
-Python 3.12+ and `asyncssh` are required. From this directory, install with
-`python3 -m pip install -e .` (Windows: `py -3.12 -m pip install -e .`) and run
-`python3 server/server.py` (Windows: `py -3.12 server/server.py`). The server listens on
-port 2222, creates its jail and the `projects`, `admin`, and `public` directories,
-and uses the persistent `server/ssh_host_ed25519_key`. Generate that key once with
-`ssh-keygen -t ed25519 -N '' -f server/ssh_host_ed25519_key` if it is absent. Keep
-the private key private. Verify its fingerprint before accepting it in a client.
-Run tests with `python3 -m unittest discover -s tests -q`.
-Use `sftp -P 2222 bob@127.0.0.1` with a verified host key to try the server.
-The group `client/client.py` is still empty, so it cannot be tested yet.
+## Setup and server
+
+Use Python 3.12 or newer and run the commands from the repository root. OpenSSH
+provides `ssh-keygen` and the optional `sftp` client.
+
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "asyncssh>=2.24.1"
+```
+
+macOS and Linux:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install 'asyncssh>=2.24.1'
+```
+
+Generate a fresh Ed25519 host key locally before using this checkout. The
+current checkout includes a tracked private host key. Move that key and its
+public counterpart aside before generating the replacement. Keep the new
+private key out of Git and reuse it between server runs.
+
+```text
+ssh-keygen -t ed25519 -f server/ssh_host_ed25519_key
+ssh-keygen -lf server/ssh_host_ed25519_key.pub
+```
+
+Press Enter twice when `ssh-keygen` prompts for a passphrase so the server can
+load the key unattended. Start the server with `python server/server.py` on
+macOS/Linux or `.\.venv\Scripts\python.exe server/server.py` in PowerShell.
+It logs the loaded policy files, creates the jail and its `projects`, `admin`,
+and `public` directories as needed, and listens on port 2222.
+
+## Connect and try the client
+
+Create a local `known_hosts` file from the verified server public key. Prefix
+the contents of `server/ssh_host_ed25519_key.pub` with `[127.0.0.1]:2222 ` on
+the same line. Use `--known-hosts` on every group-client connection while the
+default connection still disables host-key verification.
+
+```powershell
+.\.venv\Scripts\python.exe client/client.py --host 127.0.0.1 --port 2222 --username bob --known-hosts known_hosts
+```
+
+On macOS/Linux, use `python` in place of `.\.venv\Scripts\python.exe`.
+Enter Bob's configured password at the prompt. The client prints `Connected to
+SFTP subsystem (version 3).` and opens the `sftp>` prompt. Run this example
+from the repository root with a new directory name under `/projects`:
+
+```text
+sftp> pwd
+sftp> ls /
+sftp> mkdir /projects/demo
+sftp> put README.md /projects/demo/README.md
+sftp> stat /projects/demo/README.md
+sftp> get /projects/demo/README.md README.copy.md
+sftp> ls /admin
+sftp> quit
+```
+
+`pwd` prints `/`, `stat` shows the uploaded file's metadata, and `get` writes
+`README.copy.md` locally. Listing `/admin` as Bob returns permission denied.
+To try OpenSSH with the same host key, run `sftp -o UserKnownHostsFile=known_hosts
+-o StrictHostKeyChecking=yes -P 2222 bob@127.0.0.1` as a single command.
+
+## Tests
+
+Run `python -m unittest discover -s tests -q` on macOS/Linux or
+`.\.venv\Scripts\python.exe -m unittest discover -s tests -q` on Windows.
+The Windows run had 68 passes and one skip because Windows denied permission
+to create symlinks (`WinError 1314`). The skipped test passed in a separate
+Administrator PowerShell run, bringing the verified total to 69 across the
+two runs. To repeat the symlink check, run this in Administrator PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_sftp.py' -k test_symlink_paths -v
+```
+
+The live group-client test exercised all seven commands with a pinned host key
+and a byte-identical round trip. A Windows OpenSSH batch test with temporary authentication also
+transferred matching bytes in both directions, then timed out before clean exit.
+See [Tasks.md](Tasks.md) for the remaining checks and submission items.
 
 ## Access Control Design
 
